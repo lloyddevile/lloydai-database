@@ -1,8 +1,6 @@
 # Lloyd License Portal
 
-<div align="center">
-
-### Kelola lisensi dan jaringan akun Lloyd dari satu tempat.
+> ### Kelola lisensi dan jaringan akun Lloyd dari satu tempat.
 
 Portal web untuk mengelola nomor bot, akun Partner/Reseller, dan akses LloydAI
 dengan autentikasi aman serta backend Cloudflare Workers.
@@ -13,8 +11,6 @@ dengan autentikasi aman serta backend Cloudflare Workers.
 ![Hono](https://img.shields.io/badge/API-Hono-E36002)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A520-339933?logo=nodedotjs&logoColor=white)
-
-</div>
 
 ---
 
@@ -257,10 +253,4 @@ mengedit migrasi yang sudah diterapkan pada database.
 
 ---
 
-<div align="center">
-
 By : Lloyddevile
-
-</div>
-#   l l o y d a i - d a t a b a s e  
- 

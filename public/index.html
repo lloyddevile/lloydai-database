@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f3ed" />
+    <title>Lloyd License — Portal Lisensi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="login-screen" id="loginScreen">
+      <section class="login-card" aria-labelledby="loginTitle">
+        <a class="brand login-brand" href="#" aria-label="Lloyd License">
+          <span class="brand-mark">L</span>
+          <span class="brand-copy"><strong>LLOYD<span class="brand-dot">.</span></strong><small>LICENSE CONTROL</small></span>
+        </a>
+        <p class="eyebrow"><span class="eyebrow-line"></span> PORTAL LISENSI</p>
+        <h1 id="loginTitle">Selamat datang<span class="heading-period">.</span></h1>
+        <p class="page-description">Masuk untuk mengelola akun dan lisensi Lloyd.</p>
+        <form id="loginForm" class="login-form">
+          <label class="field-label">Username<input name="username" type="text" autocomplete="username" maxlength="60" required></label>
+          <label class="field-label">Password<div class="password-control"><input name="password" type="password" autocomplete="current-password" maxlength="128" required><button class="password-toggle" type="button" data-password-toggle aria-label="Tampilkan password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div></label>
+          <p class="login-error hidden" id="loginError" role="alert"></p>
+          <button class="button button-primary login-submit" type="submit" disabled><span>Masuk ke portal</span><span aria-hidden="true">↗</span></button>
+        </form>
+        <p class="login-footnote">AKSES AMAN · KONEKSI TERENKRIPSI</p>
+      </section>
+    </main>
+
+    <div class="app-shell hidden" id="appShell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#" aria-label="Lloyd License beranda">
+          <span class="brand-mark">L</span>
+          <span class="brand-copy">
+            <strong>LLOYD<span class="brand-dot">.</span></strong>
+            <small>LICENSE CONTROL</small>
+          </span>
+        </a>
+
+        <div class="workspace-label">RUANG KERJA</div>
+        <nav class="main-nav" aria-label="Navigasi utama">
+          <button class="nav-link active" data-page="overview">
+            <span class="nav-icon">◫</span><span>Ringkasan</span>
+            <span class="nav-shortcut">01</span>
+          </button>
+          <button class="nav-link" data-page="licenses">
+            <span class="nav-icon">▣</span><span>Lisensi nomor</span>
+            <span class="nav-count" id="navLicenseCount">0</span>
+          </button>
+          <button class="nav-link" data-page="accounts">
+            <span class="nav-icon">◉</span><span>Manajemen akun</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-rule"></div>
+        <div class="workspace-label">PREFERENSI</div>
+        <nav class="main-nav">
+          <button class="nav-link" data-page="settings">
+            <span class="nav-icon">⚙</span><span>Pengaturan</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-status">
+          <span class="status-pulse"></span>
+          <span><strong>PORTAL AKTIF</strong><small>Database terhubung</small></span>
+        </div>
+        <div class="profile-card">
+          <div class="avatar avatar-owner" id="sidebarAvatar">OW</div>
+          <div class="profile-copy">
+            <strong id="sidebarName">Lloyd Owner</strong>
+            <small id="sidebarRole">OWNER</small>
+          </div>
+          <button class="icon-button profile-menu" id="logoutButton" aria-label="Keluar dari portal" title="Keluar">↗</button>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <button class="icon-button mobile-menu" id="mobileMenu" aria-label="Buka navigasi" aria-expanded="false">☰</button>
+          <div class="breadcrumb"><span>Portal</span><span class="breadcrumb-slash">/</span><strong id="breadcrumbPage">Ringkasan</strong></div>
+          <div class="topbar-actions">
+            <span class="demo-chip"><i></i> DATABASE AKTIF</span>
+            <button class="icon-button notification-button" id="refreshButton" aria-label="Muat ulang data" title="Muat ulang data">↻</button>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="page-view active" id="page-overview">
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow"><span class="eyebrow-line"></span> SISTEM LISENSI / 01</p>
+                <h1>Semua terkendali<span class="heading-period">.</span></h1>
+                <p class="page-description">Pantau nomor bot dan jaringan akun Lloyd dari satu tempat.</p>
+              </div>
+              <div class="heading-actions">
+                <button class="button button-secondary" id="exportButton"><span>↓</span> Ekspor data</button>
+                <button class="button button-primary" id="primaryAction"><span class="button-plus">＋</span><span id="primaryActionText">Buat akun</span></button>
+              </div>
+            </div>
+
+            <div class="date-strip">
+              <div class="date-current"><span class="live-dot"></span> STATUS SISTEM <strong>SIAP</strong></div>
+              <span class="date-divider"></span>
+              <span id="currentDate">RABU, 21 OKTOBER 2026</span>
+              <span class="date-spacer"></span>
+              <span class="date-caption">LLOYD LICENSE PORTAL <span>·</span> V 0.1</span>
+            </div>
+
+            <div class="stat-grid">
+              <article class="stat-card stat-dark">
+                <div class="stat-top"><span>TOTAL LISENSI</span><span class="stat-symbol">▣</span></div>
+                <div class="stat-value" id="statLicenses">00</div>
+                <div class="stat-bottom"><span>Nomor bot terdaftar</span><span class="stat-index">01 / 04</span></div>
+                <div class="stat-accent"></div>
+              </article>
+              <article class="stat-card">
+                <div class="stat-top"><span>LISENSI AKTIF</span><span class="stat-symbol symbol-lime">↗</span></div>
+                <div class="stat-value" id="statActive">00</div>
+                <div class="stat-bottom"><span>Siap diverifikasi</span><span class="stat-index">02 / 04</span></div>
+              </article>
+              <article class="stat-card">
+                <div class="stat-top"><span>AKUN PARTNER</span><span class="stat-symbol">◉</span></div>
+                <div class="stat-value" id="statPartners">00</div>
+                <div class="stat-bottom"><span>Jaringan distribusi</span><span class="stat-index">03 / 04</span></div>
+              </article>
+              <article class="stat-card">
+                <div class="stat-top"><span>AKUN RESELLER</span><span class="stat-symbol">◌</span></div>
+                <div class="stat-value" id="statResellers">00</div>
+                <div class="stat-bottom"><span>Pengelola nomor bot</span><span class="stat-index">04 / 04</span></div>
+              </article>
+            </div>
+
+            <div class="section-grid">
+              <section class="panel license-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">AKTIVITAS</p>
+                    <h2>Lisensi terbaru</h2>
+                  </div>
+                  <button class="text-button" data-goto="licenses">Lihat semua <span>↗</span></button>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>NOMOR BOT</th><th>PEMILIK</th><th>STATUS</th><th>TERDAFTAR</th></tr></thead>
+                    <tbody id="overviewLicenseRows"></tbody>
+                  </table>
+                  <div class="empty-state" id="overviewEmpty">
+                    <span class="empty-icon">▣</span>
+                    <strong>Belum ada lisensi</strong>
+                    <p>Nomor bot yang didaftarkan akan muncul di sini.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel network-panel">
+                <div class="panel-heading">
+                  <div><p class="eyebrow">STRUKTUR AKUN</p><h2>Jaringan reseller</h2></div>
+                  <span class="network-total" id="networkTotal">0 AKUN</span>
+                </div>
+                <div class="network-visual">
+                  <div class="network-root">
+                    <div class="network-node owner-node"><span class="node-avatar" id="networkRootCode">OW</span><span><strong id="networkRootName">Lloyd Owner</strong><small id="networkRootRole">OWNER UTAMA</small></span><span class="node-status"></span></div>
+                  </div>
+                  <div class="network-branches" id="networkBranches"></div>
+                  <div class="network-hint"><span>↳</span> Struktur akun berdasarkan relasi akses pada portal.</div>
+                </div>
+              </section>
+            </div>
+
+            <footer class="footer-strip"><span>✳ &nbsp;DIBUAT UNTUK MENGELOLA AKSES, BUKAN MENGENDALIKAN BOT.</span><span>© LLOYD LICENSE <b>2026</b></span></footer>
+          </section>
+
+          <section class="page-view" id="page-licenses">
+            <div class="page-heading">
+              <div><p class="eyebrow"><span class="eyebrow-line"></span> AKSES / 02</p><h1>Nomor bot<span class="heading-period">.</span></h1><p class="page-description">Daftar nomor yang diberi izin untuk menjalankan Lloyd.</p></div>
+              <div class="heading-actions" id="licenseHeadingActions"><button class="button button-primary" id="addNumberButton"><span class="button-plus">＋</span> Daftarkan nomor</button></div>
+            </div>
+            <div class="toolbar">
+              <label class="search-box"><span>⌕</span><input id="licenseSearch" type="search" placeholder="Cari nomor atau reseller..." autocomplete="off"></label>
+              <div class="filter-tabs" id="licenseFilters"><button class="filter-tab active" data-filter="all">Semua <b id="filterAllCount">0</b></button><button class="filter-tab" data-filter="active">Aktif <b id="filterActiveCount">0</b></button><button class="filter-tab" data-filter="inactive">Nonaktif <b id="filterInactiveCount">0</b></button></div>
+            </div>
+            <section class="panel full-table-panel">
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>NOMOR WHATSAPP</th><th>RESELLER</th><th>STATUS</th><th>TANGGAL DIBUAT</th><th>AKSI</th></tr></thead>
+                  <tbody id="licenseRows"></tbody>
+                </table>
+                <div class="empty-state" id="licenseEmpty"><span class="empty-icon">▣</span><strong>Belum ada nomor bot</strong><p>Daftarkan nomor pertama untuk mengisi daftar ini.</p></div>
+                <div class="empty-state hidden" id="licenseNoResults"><strong>Data tidak ditemukan</strong><p>Coba kata kunci atau filter yang lain.</p></div>
+              </div>
+              <div class="table-footer"><span id="licenseTableCount">Menampilkan 0 data</span><span>DATABASE <span class="footer-green-dot"></span></span></div>
+            </section>
+          </section>
+
+          <section class="page-view" id="page-accounts">
+            <div class="page-heading">
+              <div><p class="eyebrow"><span class="eyebrow-line"></span> PENGGUNA / 03</p><h1>Jaringan akun<span class="heading-period">.</span></h1><p class="page-description">Atur partner dan reseller sesuai hierarki akses.</p></div>
+              <div class="heading-actions" id="accountHeadingActions"><button class="button button-primary" id="addAccountButton"><span class="button-plus">＋</span> Buat akun</button></div>
+            </div>
+            <div class="account-summary" id="accountSummary"></div>
+            <section class="panel full-table-panel">
+              <div class="panel-heading account-list-heading"><div><p class="eyebrow">DAFTAR PENGGUNA</p><h2 id="accountsTableTitle">Semua akun</h2></div><label class="search-box compact-search"><span>⌕</span><input id="accountSearch" type="search" placeholder="Cari nama atau email..." autocomplete="off"></label></div>
+              <div class="table-wrap">
+                <table class="data-table"><thead><tr><th>NAMA AKUN</th><th>EMAIL</th><th>ROLE</th><th>DIBUAT</th><th>STATUS</th><th>AKSI</th></tr></thead><tbody id="accountRows"></tbody></table>
+                <div class="empty-state" id="accountEmpty"><span class="empty-icon">◉</span><strong>Belum ada akun</strong><p>Akun yang dibuat akan tampil di sini.</p></div>
+                <div class="empty-state hidden" id="accountNoResults"><strong>Data tidak ditemukan</strong><p>Coba kata kunci yang lain.</p></div>
+              </div>
+              <div class="table-footer"><span id="accountTableCount">Menampilkan 0 akun</span><span>HIERARKI AKUN <span class="footer-green-dot"></span></span></div>
+            </section>
+          </section>
+
+          <section class="page-view" id="page-settings">
+            <div class="page-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span> KONFIGURASI / 04</p><h1>Pengaturan portal<span class="heading-period">.</span></h1><p class="page-description">Informasi sesi dan koneksi portal Anda.</p></div></div>
+            <div class="settings-grid">
+              <section class="panel settings-card theme-card">
+                <div class="settings-icon">◐</div><p class="eyebrow">TAMPILAN</p><h2>Tema portal</h2>
+                <p>Pilih tampilan yang nyaman. Pilihan tersimpan di perangkat ini.</p>
+                <div class="theme-options" role="group" aria-label="Pilih tema portal">
+                  <button class="theme-option" id="themeLight" type="button" data-theme-choice="light" aria-pressed="true"><span aria-hidden="true">☀</span><span><strong>Cerah</strong><small>Latar terang</small></span></button>
+                  <button class="theme-option" id="themeDark" type="button" data-theme-choice="dark" aria-pressed="false"><span aria-hidden="true">☾</span><span><strong>Gelap</strong><small>Latar gelap</small></span></button>
+                </div>
+              </section>
+              <section class="panel settings-card"><div class="settings-icon">◉</div><p class="eyebrow">AKUN PORTAL</p><h2 id="settingsAccountName">Akun</h2><p id="settingsAccountEmail">—</p><div class="settings-note"><span class="status-pulse"></span><span><strong id="settingsAccountRole">—</strong><small>Akses dan data mengikuti role akun yang masuk.</small></span></div><button class="button button-secondary reset-button" id="settingsLogout">Keluar dari portal</button></section>
+              <section class="panel settings-card">
+                <div class="settings-icon">✎</div><p class="eyebrow">PROFIL SAYA</p><h2>Nama, email &amp; password</h2>
+                <p>Ubah username login, email akun, atau kata sandi Anda.</p>
+                <button class="button button-secondary settings-action" id="editProfileButton" type="button">Ubah profil</button>
+              </section>
+              <section class="panel settings-card"><div class="settings-icon orange-icon">⌁</div><p class="eyebrow">KONEKSI</p><h2>Database portal</h2><p>Data yang ditampilkan berasal dari API terautentikasi dan database PostgreSQL.</p><div class="settings-note"><span class="status-pulse"></span><span><strong>HTTPS · sesi aman</strong><small>Cookie sesi HttpOnly dan permintaan perubahan dilindungi CSRF.</small></span></div></section>
+              <section class="panel settings-card hidden" id="announcementSettings">
+                <div class="settings-icon">✳</div><p class="eyebrow">KHUSUS OWNER</p><h2>Pengumuman portal</h2>
+                <div class="settings-note"><span class="status-pulse"></span><span><strong id="announcementStatus">Belum ada pengumuman aktif</strong><small>Pengumuman terbaru muncul sebagai pop-up setiap kali pengguna masuk.</small></span></div>
+                <button class="button button-secondary settings-action" id="editAnnouncementButton" type="button">Kelola pengumuman</button>
+              </section>
+              <section class="panel settings-card hidden" id="botPasswordSettings">
+                <div class="settings-icon">⌑</div><p class="eyebrow">AKSES BOT</p><h2>Password script</h2>
+                <p>Password bersama yang diminta saat bot dijalankan. Hanya Owner yang dapat mengubahnya.</p>
+                <div class="settings-note"><span class="status-pulse"></span><span><strong id="botPasswordStatus">Memuat status…</strong><small>Password tersimpan sebagai hash dan tidak pernah ditampilkan kembali.</small></span></div>
+                <button class="button button-secondary settings-action" id="editBotPasswordButton" type="button">Ubah password script</button>
+              </section>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-top"><span class="modal-step" id="modalStep">FORM / 01</span><button class="icon-button modal-close" id="modalClose" aria-label="Tutup">×</button></div>
+        <h2 id="modalTitle">Buat akun baru<span class="heading-period">.</span></h2>
+        <p class="modal-description" id="modalDescription">Tambahkan pengguna ke jaringan portal.</p>
+        <div class="modal-scroll-area" id="modalScrollArea">
+          <form id="modalForm"></form>
+          <div class="modal-scroll-track" id="modalScrollTrack" role="scrollbar" aria-label="Gulir isi dialog" aria-orientation="vertical" aria-controls="modalForm" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <span class="modal-scroll-thumb" id="modalScrollThumb"></span>
+          </div>
+        </div>
+        <div class="modal-foot"><span>✳ PERUBAHAN TERSIMPAN KE DATABASE</span></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"><span class="toast-check">✓</span><span id="toastMessage">Perubahan tersimpan</span></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

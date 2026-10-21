@@ -1,0 +1,35 @@
+{
+  "name": "lloyd-license-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portal lisensi Lloyd dengan Cloudflare Workers dan PostgreSQL",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "prestart": "npm run build:assets",
+    "dev": "node --watch server/index.js",
+    "predev": "npm run build:assets",
+    "dev:worker": "wrangler dev",
+    "predev:worker": "npm run build:assets",
+    "build:assets": "node scripts/build-assets.js",
+    "db:migrate": "node server/migrate.js",
+    "owner:create": "node server/create-owner.js",
+    "deploy": "wrangler deploy",
+    "predeploy": "npm run build:assets",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.6.1",
+    "hono": "^4.10.4",
+    "helmet": "^8.1.0",
+    "jose": "^6.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}
