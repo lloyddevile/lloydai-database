@@ -27,6 +27,7 @@
   let modalScrollDrag = null;
   let lastFocusedElement = null;
   let subbotPollTimer = null;
+  let subbotPollInFlight = false;
   let lastSubbotPollErrorAt = 0;
   let subbotSettingsDirty = false;
   const themeStorageKey = "lloyd-license-theme";
@@ -436,14 +437,20 @@
     if ($("#subbotQr").getAttribute("src") !== qrImage) $("#subbotQr").setAttribute("src", qrImage);
     $("#subbotCode").classList.toggle("hidden", status !== "pairing" || !subbot?.pairingCode);
     $("#subbotCode").textContent = subbot?.pairingCode || "";
+    const pairingMethod = subbot?.pairingMethod || $("#subbotMethod").value;
     $("#subbotPairingInstructions").textContent = status === "pairing"
       ? subbot?.pairingCode
         ? "Masukkan kode ini pada WhatsApp di perangkat yang ingin ditautkan."
-        : "Buka WhatsApp > Perangkat tertaut > Tautkan perangkat, lalu pindai QR berikut."
-      : "Permintaan pairing sedang diproses oleh server bot.";
+        : pairingMethod === "pairing-code"
+          ? "Sedang meminta kode pairing. Kode akan muncul otomatis di sini; biarkan proses tetap berjalan."
+          : "Buka WhatsApp > Perangkat tertaut > Tautkan perangkat, lalu pindai QR berikut."
+      : pairingMethod === "pairing-code"
+        ? "Menghubungkan ke WhatsApp untuk meminta kode pairing. Kode akan muncul otomatis di sini."
+        : "Permintaan QR pairing sedang diproses oleh server bot.";
 
     if (active && !subbotPollTimer) {
-      subbotPollTimer = setInterval(pollSubbotStatus, 2000);
+      subbotPollTimer = setInterval(pollSubbotStatus, 1000);
+      void pollSubbotStatus();
     } else if (!active && subbotPollTimer) {
       clearInterval(subbotPollTimer);
       subbotPollTimer = null;
@@ -451,6 +458,8 @@
   }
 
   async function pollSubbotStatus() {
+    if (subbotPollInFlight) return;
+    subbotPollInFlight = true;
     try {
       const result = await api("/api/subbots/me");
       state.subbot = result.subbot;
@@ -461,6 +470,8 @@
         showToast(error.message);
         lastSubbotPollErrorAt = Date.now();
       }
+    } finally {
+      subbotPollInFlight = false;
     }
   }
 
