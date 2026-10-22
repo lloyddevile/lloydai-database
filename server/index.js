@@ -11,6 +11,7 @@ const env = {
   DATABASE_URL: process.env.DATABASE_URL,
   PGSSLMODE: process.env.PGSSLMODE,
   SESSION_SECRET: process.env.SESSION_SECRET,
+  SUBBOT_WORKER_TOKEN: process.env.SUBBOT_WORKER_TOKEN,
   NODE_ENV: process.env.NODE_ENV,
 };
 
