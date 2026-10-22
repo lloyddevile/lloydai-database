@@ -29,6 +29,14 @@
           <p class="login-error hidden" id="loginError" role="alert"></p>
           <button class="button button-primary login-submit" type="submit" disabled><span>Masuk ke portal</span><span aria-hidden="true">↗</span></button>
         </form>
+        <button class="text-button login-switch" id="registerToggle" type="button">Belum punya akun? Daftar</button>
+        <form id="registerForm" class="login-form hidden">
+          <label class="field-label">Nama / username<input name="name" type="text" minlength="2" maxlength="60" autocomplete="username" required></label>
+          <label class="field-label">Email<input name="email" type="email" maxlength="120" autocomplete="email" required></label>
+          <label class="field-label">Password<div class="password-control"><input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required><button class="password-toggle" type="button" data-password-toggle aria-label="Tampilkan password" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16"/></svg></button></div><small>Minimal 8 karakter. Akun baru mendapat role User untuk pairing sub-bot.</small></label>
+          <p class="login-error hidden" id="registerError" role="alert"></p>
+          <button class="button button-primary login-submit" type="submit" disabled><span>Buat akun User</span><span aria-hidden="true">↗</span></button>
+        </form>
         <p class="login-footnote">AKSES AMAN · KONEKSI TERENKRIPSI</p>
       </section>
     </main>
@@ -55,6 +63,9 @@
           </button>
           <button class="nav-link" data-page="accounts">
             <span class="nav-icon">◉</span><span>Manajemen akun</span>
+          </button>
+          <button class="nav-link hidden" data-page="subbots">
+            <span class="nav-icon">⌁</span><span>Pairing sub-bot</span>
           </button>
         </nav>
 
@@ -92,6 +103,69 @@
         </header>
 
         <div class="content-wrap">
+          <section class="page-view" id="page-subbots">
+            <div class="page-heading">
+              <div><p class="eyebrow"><span class="eyebrow-line"></span> WHATSAPP / SUB-BOT</p><h1>Pairing sub-bot<span class="heading-period">.</span></h1><p class="page-description">Hubungkan satu akun WhatsApp sebagai sub-bot Lloyd.</p></div>
+            </div>
+            <section class="panel subbot-panel" aria-labelledby="subbotPanelTitle">
+              <div class="panel-heading"><div><p class="eyebrow">SESI ANDA</p><h2 id="subbotPanelTitle">Tautkan perangkat</h2></div><span class="status-badge status-inactive" id="subbotStatus"><i></i>Belum dipasangkan</span></div>
+              <p class="subbot-description">Sesi WhatsApp disimpan pada server bot, bukan di portal. Jangan bagikan QR atau kode pairing kepada orang lain.</p>
+              <div class="subbot-controls">
+                <label class="field-label" for="subbotMethod">Metode pairing
+                  <select id="subbotMethod">
+                    <option value="qr">QR code</option>
+                    <option value="pairing-code">Kode pairing</option>
+                  </select>
+                </label>
+                <label class="field-label hidden" id="subbotPhoneField" for="subbotPhone">Nomor WhatsApp
+                  <small>Format internasional, 8–15 digit tanpa tanda +.</small>
+                  <input id="subbotPhone" inputmode="numeric" minlength="8" maxlength="15" pattern="[1-9][0-9]{7,14}" placeholder="6281234567890">
+                </label>
+              </div>
+              <div class="subbot-actions">
+                <button class="button button-primary" id="startSubbotButton" type="button">Mulai pairing</button>
+                <button class="button button-secondary hidden" id="stopSubbotButton" type="button">Hentikan sub-bot</button>
+              </div>
+              <p class="subbot-error hidden" id="subbotError" role="alert"></p>
+              <div class="subbot-pairing hidden" id="subbotPairingArea" aria-live="polite">
+                <p id="subbotPairingInstructions"></p>
+                <img class="subbot-qr hidden" id="subbotQr" alt="QR code pairing WhatsApp">
+                <output class="subbot-code hidden" id="subbotCode"></output>
+              </div>
+            </section>
+            <section class="panel subbot-panel subbot-settings-panel" aria-labelledby="subbotSettingsTitle">
+              <div class="panel-heading"><div><p class="eyebrow">KONFIGURASI PERANGKAT</p><h2 id="subbotSettingsTitle">Identitas &amp; tampilan bot</h2></div></div>
+              <p class="subbot-description">Pengaturan ini berlaku hanya untuk sub-bot Anda. Credential API, token, dan akses server tidak dapat diubah dari portal.</p>
+              <form id="subbotSettingsForm" class="subbot-settings-form">
+                <div class="subbot-settings-grid">
+                  <label class="field-label">Nama bot<input name="botname" maxlength="60" placeholder="Nama yang tampil sebagai bot"></label>
+                  <label class="field-label">Nama bot alternatif<input name="botname2" maxlength="60"></label>
+                  <label class="field-label">Nama owner<input name="namaOwner" maxlength="60"></label>
+                  <label class="field-label">Nomor owner<input name="owner" inputmode="tel" maxlength="16" placeholder="628123456789"></label>
+                  <label class="field-label">Nama paket / stiker<input name="packname" maxlength="80"></label>
+                  <label class="field-label">Nomor Dana<input name="dana" maxlength="40"></label>
+                  <label class="field-label">Nomor GoPay<input name="gopay" maxlength="40"></label>
+                  <label class="field-label">Tautan WhatsApp owner<input name="linkOwner" type="url" maxlength="300" placeholder="https://wa.me/628..."></label>
+                  <label class="field-label">Tautan grup<input name="linkGrup" type="url" maxlength="300" placeholder="https://chat.whatsapp.com/..."></label>
+                  <label class="field-label">Tautan channel<input name="linkSaluran" type="url" maxlength="300" placeholder="https://whatsapp.com/channel/..."></label>
+                  <label class="field-label">ID channel<input name="idSaluran" maxlength="120" placeholder="ID newsletter WhatsApp"></label>
+                  <label class="field-label">Nama channel<input name="namaSaluran" maxlength="80"></label>
+                  <label class="field-label">URL gambar menu<input name="image.menu" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL gambar menu alternatif<input name="image.menuv3" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL banner welcome<input name="image.welcome" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL banner left<input name="image.left" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL gambar reply<input name="image.reply" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL gambar canvas<input name="image.canvas" type="url" maxlength="1000" placeholder="https://..."></label>
+                  <label class="field-label">URL QRIS<input name="image.qris" type="url" maxlength="1000" placeholder="https://..."></label>
+                </div>
+                <div class="subbot-actions">
+                  <button class="button button-secondary" id="saveSubbotSettingsButton" type="submit">Simpan pengaturan</button>
+                </div>
+                <p class="subbot-error hidden" id="subbotSettingsError" role="alert"></p>
+              </form>
+            </section>
+          </section>
+
           <section class="page-view active" id="page-overview">
             <div class="page-heading">
               <div>

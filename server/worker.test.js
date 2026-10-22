@@ -681,3 +681,236 @@ test("legacy token verification is disabled after moving to the shared password 
     Client.prototype.end = originalEnd;
   }
 });
+
+test("self-registration creates a user-only account and starts an authenticated session", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  const csrfToken = "signup-csrf-token";
+  const csrfSession = await createSession(undefined, csrfToken);
+  const password = "Subbot-Pass-123";
+  let insertedAccount;
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async function (sql, values) {
+    if (sql.includes("DELETE FROM portal_signup_attempts")) return { rows: [], rowCount: 0 };
+    if (sql.includes("SELECT count(*)::int AS count FROM portal_signup_attempts")) return { rows: [{ count: 0 }] };
+    if (sql.includes("INSERT INTO portal_signup_attempts")) return { rows: [], rowCount: 1 };
+    if (sql.includes("INSERT INTO portal_accounts")) {
+      insertedAccount = values;
+      return {
+        rows: [{
+          id: values[0],
+          name: values[1],
+          email: values[2],
+          role: "user",
+          parent_id: null,
+          status: "active",
+          created_at: new Date().toISOString(),
+        }],
+      };
+    }
+    throw new Error(`Unexpected database query: ${sql}`);
+  };
+
+  try {
+    const response = await app.request(
+      "https://portal.example/api/auth/register",
+      {
+        method: "POST",
+        headers: { ...sessionHeaders(csrfSession, csrfToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "New Subbot User", email: "user@example.test", password }),
+      },
+      { SESSION_SECRET: TEST_SECRET, HYPERDRIVE: { connectionString: "postgres://portal.example/db" } },
+    );
+    assert.equal(response.status, 201, await response.clone().text());
+    const body = await response.json();
+    assert.equal(body.account.role, "user", JSON.stringify(body));
+    assert.match(body.csrfToken, /^[a-f0-9]{64}$/);
+    assert.match(response.headers.get("set-cookie"), /HttpOnly/);
+    assert.equal(await bcrypt.compare(password, insertedAccount[3]), true);
+    assert.equal(insertedAccount.length, 4);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});
+
+test("sub-bot worker endpoints reject requests without the configured bearer token", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async () => {
+    throw new Error("worker auth should reject before querying");
+  };
+  try {
+    const response = await app.request(
+      "https://portal.example/api/bot/subbots/claim",
+      { method: "POST" },
+      {
+        SESSION_SECRET: TEST_SECRET,
+        SUBBOT_WORKER_TOKEN: "configured-worker-secret-with-32-characters",
+        HYPERDRIVE: { connectionString: "postgres://portal.example/db" },
+      },
+    );
+    assert.equal(response.status, 401);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});
+
+test("all account roles can save safe per-sub-bot settings", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  let currentRole;
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async function (sql, values) {
+    if (sql.includes("WITH RECURSIVE account_chain AS")) {
+      return {
+        rows: [{
+          id: `${currentRole}-id`,
+          name: "Portal Account",
+          email: `${currentRole}@example.test`,
+          role: currentRole,
+          parent_id: null,
+          status: "active",
+        }],
+      };
+    }
+    if (sql.includes("INSERT INTO portal_subbots")) {
+      return { rowCount: 1, rows: [{ config: JSON.parse(values[2]) }] };
+    }
+    throw new Error(`Unexpected database query: ${sql}`);
+  };
+
+  try {
+    const options = { SESSION_SECRET: TEST_SECRET, HYPERDRIVE: { connectionString: "postgres://portal.example/db" } };
+    for (const role of ["owner", "partner", "reseller", "user"]) {
+      currentRole = role;
+      const session = await createSession(`${role}-id`);
+      const response = await app.request(
+        "https://portal.example/api/subbots/me/settings",
+        {
+          method: "POST",
+          headers: {
+            ...sessionHeaders(session),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            config: {
+              botname: "My Bot",
+              namaOwner: "Bot Owner",
+              owner: "+62 812-3456-789",
+              image: { menu: "https://images.example/menu.png" },
+            },
+          }),
+        },
+        options,
+      );
+      assert.equal(response.status, 200, `${role} can save settings`);
+      const result = await response.json();
+      assert.equal(result.config.owner, "628123456789");
+      assert.equal(result.config.image.menu, "https://images.example/menu.png");
+    }
+
+    currentRole = "user";
+    const userSession = await createSession("user-id");
+    const invalidResponse = await app.request(
+      "https://portal.example/api/subbots/me/settings",
+      {
+        method: "POST",
+        headers: {
+          ...sessionHeaders(userSession),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ config: { dana: "0812", apiKey: "must-not-be-accepted" } }),
+      },
+      options,
+    );
+    assert.equal(invalidResponse.status, 400);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});
+
+test("user accounts can only read their own sub-bot state, not account or license data", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  const userSession = await createSession("user-id");
+  let subbotOwnerId;
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async function (sql, values) {
+    if (sql.includes("WITH RECURSIVE account_chain AS")) {
+      return {
+        rows: [{
+          id: "user-id",
+          name: "Pairing User",
+          email: "user@example.test",
+          role: "user",
+          parent_id: null,
+          status: "active",
+        }],
+      };
+    }
+    if (sql.includes("UPDATE portal_subbots")) return { rows: [] };
+    if (sql.includes("FROM portal_subbots WHERE account_id = $1")) {
+      subbotOwnerId = values[0];
+      return {
+        rows: [{
+          id: "subbot-id",
+          status: "pairing",
+          pairing_method: "qr",
+          phone: null,
+          connected_phone: null,
+          pairing_code: null,
+          qr_image: "data:image/png;base64,cXJkYXRh",
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        }],
+      };
+    }
+    throw new Error(`Unexpected database query: ${sql}`);
+  };
+
+  try {
+    const options = { SESSION_SECRET: TEST_SECRET, HYPERDRIVE: { connectionString: "postgres://portal.example/db" } };
+    const headers = sessionHeaders(userSession);
+    const subbotResponse = await app.request(
+      "https://portal.example/api/subbots/me",
+      { headers },
+      options,
+    );
+    assert.equal(subbotResponse.status, 200);
+    const subbotBody = await subbotResponse.json();
+    assert.equal(subbotBody.subbot.qrImage, "data:image/png;base64,cXJkYXRh");
+    assert.equal(subbotOwnerId, "user-id");
+
+    const accountResponse = await app.request(
+      "https://portal.example/api/accounts",
+      { headers },
+      options,
+    );
+    assert.equal(accountResponse.status, 403);
+    const licenseResponse = await app.request(
+      "https://portal.example/api/licenses",
+      { headers },
+      options,
+    );
+    assert.equal(licenseResponse.status, 403);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});

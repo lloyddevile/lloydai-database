@@ -43,6 +43,10 @@ untuk deployment, atau koneksi lokal untuk pengembangan dan migrasi.
 - **Jaringan akun** — Owner dan Partner mengelola akun sesuai hierarki akses.
 - **Profil mandiri** — semua role dapat mengganti username, email, dan password.
   Username bersifat unik; password minimal 8 karakter.
+- **Pairing sub-bot** — semua role dapat memasangkan satu akun WhatsApp per
+  akun melalui QR atau kode pairing.
+- **Pengaturan sub-bot** — pemilik sesi dapat mengatur nama bot/owner, kontak,
+  tautan, gambar, dan nomor pembayaran secara terpisah dari bot utama.
 - **Pengumuman portal** — Owner dapat menerbitkan, mengganti, atau menghapus
   pengumuman yang muncul kepada pengguna saat login.
 - **Password script bersama** — Owner dapat mengatur password script; server
@@ -53,6 +57,8 @@ untuk deployment, atau koneksi lokal untuk pengembangan dan migrasi.
   desktop maupun ponsel.
 - **Endpoint verifikasi bot** — verifikasi password, nomor lisensi, dan status
   lisensi dengan challenge serta token bertanda tangan.
+- **Worker pairing terbatas** — host LloydAI mengambil permintaan pairing
+  melalui API bertoken; portal tidak menerima file sesi WhatsApp.
 
 ## Teknologi
 
@@ -78,9 +84,10 @@ flowchart LR
 
 | Role | Hak akses utama |
 |---|---|
-| **Owner** | Mengelola akun Partner/Reseller, lisensi, pengumuman, dan password script |
-| **Partner** | Membuat akun Reseller dalam jaringan dan mengelola lisensi sesuai akses |
-| **Reseller** | Mendaftarkan nomor serta mengelola lisensi miliknya |
+| **Owner** | Mengelola akun Partner/Reseller, lisensi, pengumuman, password script, dan satu sub-bot miliknya |
+| **Partner** | Membuat akun Reseller, mengelola lisensi sesuai akses, dan satu sub-bot miliknya |
+| **Reseller** | Mengelola lisensi miliknya dan satu sub-bot miliknya |
+| **User** | Mendaftar sendiri dan mengelola satu sub-bot miliknya |
 
 Setiap akun dapat mengubah profilnya sendiri. Hak akses dan kepemilikan data
 diverifikasi di server, bukan hanya disembunyikan dari tampilan.
@@ -114,10 +121,17 @@ Buat file `.dev.vars` untuk Cloudflare Worker lokal:
 
 ```dotenv
 SESSION_SECRET=GANTI_DENGAN_SECRET_LOKAL_MINIMAL_32_KARAKTER
+SUBBOT_WORKER_TOKEN=GANTI_DENGAN_TOKEN_ACAK_MINIMAL_32_KARAKTER
 ```
 
 Gunakan secret berbeda untuk lokal dan produksi. File `.env` dan `.dev.vars`
 diabaikan Git; jangan unggah, tempel ke issue, atau masukkan nilainya ke kode.
+Atur nilai `SUBBOT_WORKER_TOKEN` yang sama sebagai environment variable
+`LLOYD_SUBBOT_WORKER_TOKEN` pada host LloydAI. Token hanya dipakai oleh worker
+bot-ke-portal, bukan browser. Jika worker berjalan pada host yang sama dengan
+bot utama, cukup jalankan `npm start`. Untuk server Pterodactyl terpisah,
+jalankan worker dengan `LLOYD_SUBBOT_WORKER_ONLY=true` dan token yang sama;
+hapus token worker dari host utama agar satu sesi tidak dijalankan di dua host.
 
 ### 3. Terapkan migrasi database
 
@@ -169,6 +183,7 @@ npm run dev
 
    ```powershell
    npx wrangler secret put SESSION_SECRET
+   npx wrangler secret put SUBBOT_WORKER_TOKEN
    ```
 
    Gunakan secret acak minimal 32 karakter yang berbeda dari secret lokal.
@@ -199,6 +214,7 @@ ambil token dari `GET /api/auth/csrf` lalu kirim melalui header
 | `GET` | `/api/health` | Status Worker dan koneksi database |
 | `GET` | `/api/auth/csrf` | Mengeluarkan token CSRF |
 | `POST` | `/api/auth/login` | Login menggunakan username dan password |
+| `POST` | `/api/auth/register` | Mendaftar sebagai akun User untuk pairing sub-bot |
 | `POST` | `/api/auth/logout` | Mengakhiri sesi |
 | `GET` | `/api/auth/me` | Membaca akun pada sesi aktif |
 | `PATCH` | `/api/auth/profile` | Memperbarui username, email, atau password sendiri |
@@ -214,6 +230,12 @@ ambil token dari `GET /api/auth/csrf` lalu kirim melalui header
 | `GET`, `POST` | `/api/licenses` | Membaca atau mendaftarkan lisensi |
 | `DELETE` | `/api/licenses/:id` | Menghapus lisensi sesuai hierarki |
 | `PATCH` | `/api/licenses/:id/status` | Mengubah status lisensi |
+| `GET`, `POST`, `DELETE` | `/api/subbots/me` | Melihat, memulai, atau menghentikan sub-bot milik akun |
+| `POST` | `/api/subbots/me/settings` | Menyimpan pengaturan non-rahasia sub-bot milik akun |
+| `POST` | `/api/bot/subbots/claim` | Worker bot mengambil satu tugas pairing/stop |
+| `POST` | `/api/bot/subbots/sync` | Worker menyelaraskan sesi aktif dan izin akun |
+| `POST` | `/api/bot/subbots/:id/status` | Worker memperbarui status pairing |
+| `POST` | `/api/bot/subbots/:id/heartbeat` | Worker memeriksa izin sesi aktif |
 
 Challenge verifikasi password berlaku 5 menit; grant pemeriksaan status berlaku
 30 hari. Endpoint bot memverifikasi status lisensi dan akun terkait. Endpoint
@@ -245,6 +267,12 @@ mengedit migrasi yang sudah diterapkan pada database.
   `SameSite=Strict`, dan `Secure` di produksi.
 - Request perubahan dilindungi CSRF; akses role dan status akun diverifikasi
   pada server.
+- Pairing sub-bot hanya menerima operasi start/stop yang ditentukan API. Token
+  worker disimpan sebagai secret, dan QR/kode pairing hanya tersedia sementara
+  untuk akun pemilik. File autentikasi WhatsApp tetap berada di host bot.
+- Pengaturan sub-bot hanya menerima nama, tautan HTTPS, gambar HTTPS, dan
+  informasi pembayaran yang diizinkan. API key, token, kredensial panel, dan
+  rahasia konfigurasi server tidak dapat disimpan lewat form portal.
 - Password akun dan password script disimpan sebagai hash bcrypt.
 - Login dibatasi berdasarkan IP; endpoint verifikasi nomor juga memiliki batas
   request.

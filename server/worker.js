@@ -120,6 +120,84 @@ function licenseDto(row) {
   };
 }
 
+function subbotDto(row) {
+  const pairingActive = row.status === "pairing";
+  return {
+    id: row.id,
+    status: row.status,
+    pairingMethod: row.pairing_method,
+    phone: row.phone,
+    connectedPhone: row.connected_phone,
+    pairingCode: pairingActive ? row.pairing_code : null,
+    qrImage: pairingActive ? row.qr_image : null,
+    error: row.error_message,
+    updatedAt: row.updated_at,
+    config: row.config || {},
+  };
+}
+
+const subbotConfigTextLimits = {
+  botname: 60,
+  botname2: 60,
+  namaOwner: 60,
+  owner: 16,
+  packname: 80,
+  linkOwner: 300,
+  linkGrup: 300,
+  linkSaluran: 300,
+  idSaluran: 120,
+  namaSaluran: 80,
+  dana: 40,
+  gopay: 40,
+};
+const subbotImageKeys = ["menu", "menuv3", "welcome", "left", "reply", "canvas", "qris"];
+const subbotUrlKeys = new Set([
+  "linkOwner", "linkGrup", "linkSaluran",
+  ...subbotImageKeys.map((key) => `image.${key}`),
+]);
+
+function normalizeSubbotConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const keys = new Set([...Object.keys(subbotConfigTextLimits), "image"]);
+  if (Object.keys(value).some((key) => !keys.has(key))) return null;
+  const config = {};
+  for (const [key, maxLength] of Object.entries(subbotConfigTextLimits)) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "string" || value[key].length > maxLength) return null;
+    const text = value[key].trim();
+    if (key === "owner" && text && !/^\+?[1-9]\d{7,14}$/.test(text.replace(/[\s()-]/g, ""))) return null;
+    if (subbotUrlKeys.has(key) && text) {
+      try {
+        if (new URL(text).protocol !== "https:") return null;
+      } catch {
+        return null;
+      }
+    }
+    if (text) config[key] = key === "owner" ? text.replace(/\D/g, "") : text;
+  }
+  if (value.image !== undefined) {
+    if (!value.image || typeof value.image !== "object" || Array.isArray(value.image)
+        || Object.keys(value.image).some((key) => !subbotImageKeys.includes(key))) return null;
+    const image = {};
+    for (const key of subbotImageKeys) {
+      const url = value.image[key];
+      if (url === undefined) continue;
+      if (typeof url !== "string" || url.length > 1000) return null;
+      const text = url.trim();
+      if (text) {
+        try {
+          if (new URL(text).protocol !== "https:") return null;
+        } catch {
+          return null;
+        }
+        image[key] = text;
+      }
+    }
+    if (Object.keys(image).length) config.image = image;
+  }
+  return config;
+}
+
 function announcementDto(row) {
   return {
     title: row.title,
@@ -238,6 +316,22 @@ async function requireAuth(c, next) {
   await next();
 }
 
+async function requireSubbotWorker(c, next) {
+  const expected = c.env.SUBBOT_WORKER_TOKEN;
+  const authorization = c.req.header("Authorization") || "";
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (typeof expected !== "string" || expected.length < 32) {
+    return apiError(c, 503, "Worker sub-bot belum dikonfigurasi.");
+  }
+  const expectedBytes = Buffer.from(expected);
+  const suppliedBytes = Buffer.from(supplied);
+  if (expectedBytes.length !== suppliedBytes.length
+      || !crypto.timingSafeEqual(expectedBytes, suppliedBytes)) {
+    return apiError(c, 401, "Otorisasi worker tidak berlaku.");
+  }
+  await next();
+}
+
 const api = new Hono();
 
 api.get("/health", async (c) => {
@@ -317,6 +411,54 @@ api.post("/auth/login", requireCsrf, async (c) => {
     },
     csrfToken,
   });
+});
+
+api.post("/auth/register", requireCsrf, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const password = typeof body?.password === "string" ? body.password : "";
+  if (name.length < 2 || name.length > 60
+      || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120
+      || password.length < 8 || password.length > 128) {
+    return apiError(c, 400, "Data pendaftaran tidak valid. Password harus berisi 8–128 karakter.");
+  }
+
+  const ip = c.req.header("CF-Connecting-IP") || "unknown";
+  const ipHash = crypto.createHmac("sha256", getSecret(c.env)).update(ip).digest("hex");
+  const db = c.get("db");
+  await db.query("DELETE FROM portal_signup_attempts WHERE attempted_at < now() - interval '1 hour'");
+  const attempts = await db.query(
+    `SELECT count(*)::int AS count FROM portal_signup_attempts
+     WHERE ip_hash = $1 AND attempted_at >= now() - interval '1 hour'`,
+    [ipHash],
+  );
+  if (attempts.rows[0].count >= 5) {
+    return apiError(c, 429, "Terlalu banyak pendaftaran. Coba lagi dalam satu jam.");
+  }
+  await db.query("INSERT INTO portal_signup_attempts (ip_hash) VALUES ($1)", [ipHash]);
+
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const result = await db.query(
+      `INSERT INTO portal_accounts (id, name, email, password_hash, role)
+       VALUES ($1, $2, $3, $4, 'user')
+       RETURNING id, name, email, role, parent_id, status, created_at`,
+      [crypto.randomUUID(), name, email, passwordHash],
+    );
+    const account = accountDto(result.rows[0]);
+    const csrfToken = crypto.randomBytes(32).toString("hex");
+    setSessionCookie(c, await signSession(c.env, { accountId: account.id, csrf: csrfToken }), c.env);
+    return c.json({ account, csrfToken }, 201);
+  } catch (error) {
+    if (error.code === "23505" && error.constraint === "portal_accounts_name_lower_uq") {
+      return apiError(c, 409, "Username tersebut sudah digunakan.");
+    }
+    if (error.code === "23505" && error.constraint === "portal_accounts_email_lower_uq") {
+      return apiError(c, 409, "Email sudah digunakan.");
+    }
+    throw error;
+  }
 });
 
 api.post("/auth/logout", requireCsrf, requireAuth, (c) => {
@@ -542,6 +684,188 @@ api.post("/bot/number/status", async (c) => {
   return c.json({ valid, ...(!valid ? { message: "nomor tidak terverifikasi" } : {}) });
 });
 
+api.get("/subbots/me", requireAuth, async (c) => {
+  await c.get("db").query(
+    `UPDATE portal_subbots
+     SET status = 'failed', command = NULL, pairing_code = NULL, qr_image = NULL,
+         error_message = 'Waktu pairing habis. Silakan mulai pairing ulang.',
+         updated_at = now()
+     WHERE account_id = $1 AND status IN ('queued', 'starting', 'pairing')
+       AND updated_at < now() - interval '10 minutes'`,
+    [c.get("account").id],
+  );
+  const result = await c.get("db").query(
+    `SELECT id, status, pairing_method, phone, connected_phone, pairing_code,
+            qr_image, error_message, updated_at, config
+     FROM portal_subbots WHERE account_id = $1`,
+    [c.get("account").id],
+  );
+  return c.json({ subbot: result.rows[0] ? subbotDto(result.rows[0]) : null });
+});
+
+api.post("/subbots/me/settings", requireCsrf, requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const config = normalizeSubbotConfig(body?.config);
+  if (!config) return apiError(c, 400, "Pengaturan sub-bot tidak valid. Periksa teks dan URL HTTPS.");
+  const result = await c.get("db").query(
+    `INSERT INTO portal_subbots (id, account_id, status, config)
+     VALUES ($1, $2, 'stopped', $3::jsonb)
+     ON CONFLICT (account_id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()
+     WHERE portal_subbots.status IN ('stopped', 'failed')
+     RETURNING config`,
+    [crypto.randomUUID(), c.get("account").id, JSON.stringify(config)],
+  );
+  if (!result.rowCount) return apiError(c, 409, "Hentikan sub-bot sebelum mengubah pengaturannya.");
+  return c.json({ config: result.rows[0].config });
+});
+
+api.post("/subbots/me", requireCsrf, requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const method = body?.method;
+  const phone = typeof body?.phone === "string" ? body.phone : null;
+  if (!["qr", "pairing-code"].includes(method)
+      || (method === "pairing-code" && !validatePhone(phone))
+      || (method === "qr" && phone !== null)) {
+    return apiError(c, 400, "Pilih metode pairing yang valid dan masukkan nomor untuk kode pairing.");
+  }
+
+  const result = await c.get("db").query(
+    `INSERT INTO portal_subbots
+       (id, account_id, status, command, pairing_method, phone, pairing_code, qr_image,
+        connected_phone, error_message, created_at, updated_at, worker_seen_at)
+     VALUES ($1, $2, 'queued', 'pair', $3, $4, NULL, NULL, NULL, NULL, now(), now(), NULL)
+     ON CONFLICT (account_id) DO UPDATE SET
+       status = 'queued', command = 'pair', pairing_method = EXCLUDED.pairing_method,
+       phone = EXCLUDED.phone, pairing_code = NULL, qr_image = NULL,
+       connected_phone = NULL, error_message = NULL, updated_at = now(), worker_seen_at = NULL
+     WHERE portal_subbots.status IN ('stopped', 'failed')
+     RETURNING id, status, pairing_method, phone, connected_phone, pairing_code,
+             qr_image, error_message, updated_at, config`,
+    [crypto.randomUUID(), c.get("account").id, method, phone],
+  );
+  if (!result.rowCount) return apiError(c, 409, "Sub-bot Anda sedang diproses atau sudah terhubung.");
+  return c.json({ subbot: subbotDto(result.rows[0]) }, 202);
+});
+
+api.delete("/subbots/me", requireCsrf, requireAuth, async (c) => {
+  const result = await c.get("db").query(
+    `UPDATE portal_subbots
+     SET status = 'stop_requested', command = 'stop', pairing_code = NULL,
+         qr_image = NULL, error_message = NULL, updated_at = now()
+     WHERE account_id = $1 AND status IN ('queued', 'starting', 'pairing', 'connected')
+     RETURNING id`,
+    [c.get("account").id],
+  );
+  if (!result.rowCount) return apiError(c, 404, "Tidak ada sub-bot aktif untuk dihentikan.");
+  return c.json({ stopping: true }, 202);
+});
+
+api.post("/bot/subbots/claim", requireSubbotWorker, async (c) => {
+  const db = c.get("db");
+  await db.query("BEGIN");
+  try {
+    const result = await db.query(
+      `SELECT id, account_id, command, pairing_method, phone, config
+       FROM portal_subbots WHERE command IS NOT NULL
+       ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED`,
+    );
+    const task = result.rows[0];
+    if (!task) {
+      await db.query("COMMIT");
+      return c.json({ task: null });
+    }
+    const status = task.command === "pair" ? "starting" : "stop_requested";
+    await db.query(
+      "UPDATE portal_subbots SET command = NULL, status = $1, updated_at = now(), worker_seen_at = now() WHERE id = $2",
+      [status, task.id],
+    );
+    await db.query("COMMIT");
+    return c.json({
+      task: {
+        id: task.id,
+        accountId: task.account_id,
+        action: task.command,
+        method: task.pairing_method,
+        phone: task.phone,
+        config: task.config || {},
+      },
+    });
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
+});
+
+api.post("/bot/subbots/sync", requireSubbotWorker, async (c) => {
+  const result = await c.get("db").query(
+    `SELECT subbot.id, subbot.account_id, subbot.pairing_method, subbot.phone, subbot.config
+     FROM portal_subbots subbot
+     JOIN portal_accounts account ON account.id = subbot.account_id
+     WHERE subbot.status IN ('starting', 'pairing', 'connected')
+       AND account.status = 'active'
+     ORDER BY subbot.created_at`,
+  );
+  const revoked = await c.get("db").query(
+    `SELECT subbot.id, account.id IS NULL AS purge_session
+     FROM portal_subbots subbot
+     LEFT JOIN portal_accounts account ON account.id = subbot.account_id
+     WHERE (account.id IS NULL OR account.status <> 'active')
+       AND subbot.status IN ('queued', 'starting', 'pairing', 'connected', 'stop_requested')`,
+  );
+  return c.json({
+    subbots: result.rows.map((row) => ({
+      id: row.id,
+      accountId: row.account_id,
+      method: row.pairing_method,
+      phone: row.phone,
+      config: row.config || {},
+    })),
+    revoked: revoked.rows.map((row) => ({ id: row.id, purgeSession: row.purge_session })),
+  });
+});
+
+api.post("/bot/subbots/:id/status", requireSubbotWorker, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const allowedStatuses = ["starting", "pairing", "connected", "stopped", "failed"];
+  const status = body?.status;
+  const pairingCode = typeof body?.pairingCode === "string" ? body.pairingCode : null;
+  const qrImage = typeof body?.qrImage === "string" ? body.qrImage : null;
+  const connectedPhone = typeof body?.connectedPhone === "string" ? body.connectedPhone : null;
+  const errorMessage = typeof body?.error === "string" ? body.error.trim().slice(0, 500) : null;
+  if (!allowedStatuses.includes(status)
+      || (pairingCode && pairingCode.length > 64)
+      || (qrImage && (!qrImage.startsWith("data:image/png;base64,") || qrImage.length > 100_000))
+      || (connectedPhone && !validatePhone(connectedPhone))) {
+    return apiError(c, 400, "Status worker sub-bot tidak valid.");
+  }
+  const result = await c.get("db").query(
+    `UPDATE portal_subbots SET
+       status = $1::varchar,
+       pairing_code = CASE WHEN $1::varchar = 'pairing' THEN $2::varchar ELSE NULL END,
+       qr_image = CASE WHEN $1::varchar = 'pairing' THEN $3::text ELSE NULL END,
+       connected_phone = CASE WHEN $1::varchar = 'connected' THEN $4::varchar ELSE connected_phone END,
+       error_message = CASE WHEN $1::varchar = 'failed' THEN $5::varchar ELSE NULL END,
+       updated_at = now(), worker_seen_at = now()
+     WHERE id = $6::uuid
+     RETURNING id`,
+    [status, pairingCode, qrImage, connectedPhone, errorMessage, c.req.param("id")],
+  );
+  if (!result.rowCount) return apiError(c, 404, "Sub-bot tidak ditemukan.");
+  return c.json({ updated: true });
+});
+
+api.post("/bot/subbots/:id/heartbeat", requireSubbotWorker, async (c) => {
+  const result = await c.get("db").query(
+    `UPDATE portal_subbots subbot SET worker_seen_at = now()
+     FROM portal_accounts account
+     WHERE subbot.id = $1 AND subbot.account_id = account.id
+       AND account.status = 'active' AND subbot.status = 'connected'
+     RETURNING subbot.id`,
+    [c.req.param("id")],
+  );
+  return c.json({ active: result.rowCount > 0 });
+});
+
 api.get("/accounts", requireAuth, async (c) => {
   const actor = c.get("account");
   let result;
@@ -557,6 +881,8 @@ api.get("/accounts", requireAuth, async (c) => {
        ORDER BY created_at DESC`,
       [actor.id],
     );
+  } else if (actor.role === "user") {
+    return apiError(c, 403, "Akun user hanya dapat mengakses fitur sub-bot.");
   } else {
     return c.json({ accounts: [] });
   }
@@ -633,6 +959,14 @@ api.delete("/accounts/:id", requireCsrf, requireAuth, async (c) => {
         [target.id],
       );
     }
+    if (target.role === "user") {
+      await db.query(
+        `UPDATE portal_subbots SET status = 'stop_requested', command = 'stop',
+         pairing_code = NULL, qr_image = NULL, updated_at = now()
+         WHERE account_id = $1`,
+        [target.id],
+      );
+    }
     await db.query("DELETE FROM portal_accounts WHERE id = $1", [target.id]);
     await db.query("COMMIT");
     return c.body(null, 204);
@@ -658,6 +992,7 @@ api.patch("/accounts/:id/status", requireCsrf, requireAuth, async (c) => {
 api.get("/licenses", requireAuth, async (c) => {
   const actor = c.get("account");
   const db = c.get("db");
+  if (actor.role === "user") return apiError(c, 403, "Akun user hanya dapat mengakses fitur sub-bot.");
   if (actor.role === "reseller") {
     const result = await db.query(
       `SELECT id, phone, reseller_id, created_by_id, status, created_at
@@ -685,6 +1020,7 @@ api.post("/licenses", requireCsrf, requireAuth, async (c) => {
   const phone = typeof body?.phone === "string" ? body.phone.replace(/\D/g, "") : "";
   if (!validatePhone(phone)) return apiError(c, 400, "Nomor harus berupa 8–15 digit internasional tanpa tanda +.");
   const actor = c.get("account");
+  if (actor.role === "user") return apiError(c, 403, "Akun user hanya dapat mengakses fitur sub-bot.");
   try {
     const result = await c.get("db").query(
       `INSERT INTO portal_licenses (id, phone, reseller_id, created_by_id)

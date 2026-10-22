@@ -1,12 +1,13 @@
 (() => {
   "use strict";
 
-  const roleLabels = { owner: "Owner", partner: "Partner", reseller: "Reseller" };
-  const roleCodes = { owner: "OW", partner: "PT", reseller: "RS" };
+  const roleLabels = { owner: "Owner", partner: "Partner", reseller: "Reseller", user: "User" };
+  const roleCodes = { owner: "OW", partner: "PT", reseller: "RS", user: "US" };
   const pageLabels = {
     overview: "Ringkasan",
     licenses: "Lisensi nomor",
     accounts: "Manajemen akun",
+    subbots: "Pairing sub-bot",
     settings: "Pengaturan",
   };
   const state = {
@@ -16,6 +17,7 @@
     announcement: null,
     csrfToken: "",
     botPasswordConfigured: false,
+    subbot: null,
   };
   let currentPage = "overview";
   let activeFilter = "all";
@@ -24,6 +26,9 @@
   let toastTimeout;
   let modalScrollDrag = null;
   let lastFocusedElement = null;
+  let subbotPollTimer = null;
+  let lastSubbotPollErrorAt = 0;
+  let subbotSettingsDirty = false;
   const themeStorageKey = "lloyd-license-theme";
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -37,6 +42,7 @@
   const isOwner = () => state.account?.role === "owner";
   const isPartner = () => state.account?.role === "partner";
   const isReseller = () => state.account?.role === "reseller";
+  const isUser = () => state.account?.role === "user";
 
   function applyTheme(theme, persist = false) {
     const selectedTheme = theme === "dark" ? "dark" : "light";
@@ -59,10 +65,14 @@
   }
 
   function showLogin(message = "", refreshCsrf = false) {
+    clearInterval(subbotPollTimer);
+    subbotPollTimer = null;
     state.account = null;
     state.accounts = [];
     state.licenses = [];
     state.botPasswordConfigured = false;
+    state.subbot = null;
+    subbotSettingsDirty = false;
     state.csrfToken = "";
     $("#appShell").classList.add("hidden");
     $("#loginScreen").classList.remove("hidden");
@@ -70,6 +80,12 @@
     $("#loginError").textContent = message;
     $("#loginError").classList.toggle("hidden", !message);
     $("#loginForm").reset();
+    $("#registerForm").reset();
+    $("#registerForm").classList.add("hidden");
+    $("#loginForm").classList.remove("hidden");
+    $("#registerToggle").classList.remove("hidden");
+    $("#registerToggle").textContent = "Belum punya akun? Daftar";
+    $("#registerError").classList.add("hidden");
     if (refreshCsrf) {
       getCsrfToken().catch((error) => {
         $("#loginError").textContent = error.message;
@@ -115,19 +131,28 @@
     }
     state.csrfToken = result.csrfToken;
     $("#loginForm button[type='submit']").disabled = false;
+    $("#registerForm button[type='submit']").disabled = false;
   }
 
   async function loadPortalData() {
+    if (isUser()) {
+      const result = await api("/api/subbots/me");
+      state.subbot = result.subbot;
+      render();
+      return;
+    }
     const requests = [
       api("/api/accounts"),
       api("/api/licenses"),
       api("/api/announcement"),
+      api("/api/subbots/me"),
     ];
     if (isOwner()) requests.push(api("/api/bot/password"));
-    const [accountsResult, licensesResult, announcementResult, botPasswordResult] = await Promise.all(requests);
+    const [accountsResult, licensesResult, announcementResult, subbotResult, botPasswordResult] = await Promise.all(requests);
     state.accounts = accountsResult.accounts;
     state.licenses = licensesResult.licenses;
     state.announcement = announcementResult.announcement;
+    state.subbot = subbotResult.subbot;
     state.botPasswordConfigured = Boolean(botPasswordResult?.configured);
     render();
   }
@@ -181,6 +206,7 @@
 
   function setPage(page) {
     if (!pageLabels[page]) return;
+    if (isUser() && page !== "subbots" && page !== "settings") return;
     if (page === "accounts" && isReseller()) return;
     currentPage = page;
     $$(".page-view").forEach((view) => view.classList.toggle("active", view.id === `page-${page}`));
@@ -329,6 +355,7 @@
     $("#settingsAccountEmail").textContent = account.email;
     $("#settingsAccountRole").textContent = `${roleName(account.role)} · ${account.status || "active"}`;
     $("#botPasswordSettings").classList.toggle("hidden", !isOwner());
+    $("#sidebar").classList.toggle("subbot-user", isUser());
     if (isOwner()) {
       $("#botPasswordStatus").textContent = state.botPasswordConfigured
         ? "Password sudah diatur"
@@ -346,15 +373,105 @@
     $("#addAccountButton").classList.toggle("hidden", !showCreateAccount);
     $("#accountHeadingActions").classList.toggle("hidden", !showCreateAccount);
     $("#licenseHeadingActions").classList.remove("hidden");
-    $('[data-page="accounts"]').classList.toggle("hidden", isReseller());
+    $('[data-page="overview"]').classList.toggle("hidden", isUser());
+    $('[data-page="licenses"]').classList.toggle("hidden", isUser());
+    $('[data-page="accounts"]').classList.toggle("hidden", isReseller() || isUser());
+    $('[data-page="subbots"]').classList.remove("hidden");
+    $("#page-overview").classList.toggle("hidden", isUser());
+    $("#page-licenses").classList.toggle("hidden", isUser());
+    $("#page-accounts").classList.toggle("hidden", isReseller() || isUser());
+    $("#page-subbots").classList.remove("hidden");
     $("#primaryActionText").textContent = showCreateAccount ? "Buat akun" : "Daftarkan nomor";
     $("#primaryAction").classList.toggle("hidden", !(showCreateAccount || isReseller()));
+    $("#exportButton").classList.toggle("hidden", isUser());
+    if (isUser() && currentPage !== "subbots" && currentPage !== "settings") setPage("subbots");
     if (currentPage === "accounts" && isReseller()) setPage("overview");
+  }
+
+  function renderSubbot() {
+    const subbot = state.subbot;
+    const statusCopy = {
+      queued: "Menunggu server",
+      starting: "Menyiapkan sesi",
+      pairing: "Menunggu pairing",
+      connected: "Terhubung",
+      stop_requested: "Menghentikan",
+      stopped: "Dihentikan",
+      failed: "Gagal",
+    };
+    const status = subbot?.status || "idle";
+    const badge = $("#subbotStatus");
+    badge.className = `status-badge ${status === "connected" ? "status-active" : "status-inactive"}`;
+    badge.innerHTML = `<i></i>${escapeHtml(statusCopy[status] || "Belum dipasangkan")}`;
+
+    const active = ["queued", "starting", "pairing", "connected", "stop_requested"].includes(status);
+    $("#startSubbotButton").classList.toggle("hidden", active);
+    $("#startSubbotButton").textContent = ["failed", "stopped"].includes(status) ? "Pairing ulang" : "Mulai pairing";
+    $("#stopSubbotButton").classList.toggle("hidden", !active);
+    $("#subbotMethod").disabled = active;
+    $("#subbotPhone").disabled = active;
+    $("#subbotSettingsForm").querySelectorAll("input, button").forEach((input) => {
+      input.disabled = active;
+    });
+    if (!subbotSettingsDirty) {
+      const config = subbot?.config || {};
+      const form = $("#subbotSettingsForm");
+      for (const input of form.querySelectorAll("input[name]")) {
+        const [section, key] = input.name.split(".");
+        input.value = section === "image" ? config.image?.[key] || "" : config[section] || "";
+      }
+    }
+    $("#subbotMethod").value = subbot?.pairingMethod || $("#subbotMethod").value || "qr";
+    $("#subbotPhoneField").classList.toggle("hidden", $("#subbotMethod").value !== "pairing-code");
+    $("#subbotPhone").required = $("#subbotMethod").value === "pairing-code";
+    if (subbot?.phone) $("#subbotPhone").value = subbot.phone;
+    $("#subbotError").textContent = subbot?.error || "";
+    $("#subbotError").classList.toggle("hidden", !subbot?.error);
+
+    const pairingArea = $("#subbotPairingArea");
+    const showPairing = status === "pairing" || status === "starting" || status === "queued";
+    pairingArea.classList.toggle("hidden", !showPairing);
+    $("#subbotQr").classList.toggle("hidden", status !== "pairing" || !subbot?.qrImage);
+    const qrImage = subbot?.qrImage || "";
+    if ($("#subbotQr").getAttribute("src") !== qrImage) $("#subbotQr").setAttribute("src", qrImage);
+    $("#subbotCode").classList.toggle("hidden", status !== "pairing" || !subbot?.pairingCode);
+    $("#subbotCode").textContent = subbot?.pairingCode || "";
+    $("#subbotPairingInstructions").textContent = status === "pairing"
+      ? subbot?.pairingCode
+        ? "Masukkan kode ini pada WhatsApp di perangkat yang ingin ditautkan."
+        : "Buka WhatsApp > Perangkat tertaut > Tautkan perangkat, lalu pindai QR berikut."
+      : "Permintaan pairing sedang diproses oleh server bot.";
+
+    if (active && !subbotPollTimer) {
+      subbotPollTimer = setInterval(pollSubbotStatus, 2000);
+    } else if (!active && subbotPollTimer) {
+      clearInterval(subbotPollTimer);
+      subbotPollTimer = null;
+    }
+  }
+
+  async function pollSubbotStatus() {
+    try {
+      const result = await api("/api/subbots/me");
+      state.subbot = result.subbot;
+      lastSubbotPollErrorAt = 0;
+      renderSubbot();
+    } catch (error) {
+      if (Date.now() - lastSubbotPollErrorAt > 30_000) {
+        showToast(error.message);
+        lastSubbotPollErrorAt = Date.now();
+      }
+    }
   }
 
   function render() {
     if (!state.account) return;
     renderHeaderAndPermissions();
+    if (isUser()) {
+      renderSubbot();
+      return;
+    }
+    renderSubbot();
     renderOverview();
     renderLicenses();
     renderAccounts();
@@ -686,13 +803,132 @@
         await loadPortalData();
         $("#loginScreen").classList.add("hidden");
         $("#appShell").classList.remove("hidden");
-        setPage("overview");
+        setPage(isUser() ? "subbots" : "overview");
         showAnnouncement();
       } catch (error) {
         $("#loginError").textContent = error.message;
         $("#loginError").classList.remove("hidden");
       } finally {
         submit.disabled = false;
+      }
+    });
+    $("#registerToggle").addEventListener("click", () => {
+      const registering = $("#registerForm").classList.contains("hidden");
+      $("#registerForm").classList.toggle("hidden", !registering);
+      $("#loginForm").classList.toggle("hidden", registering);
+      $("#registerToggle").textContent = registering ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar";
+      $("#loginError").classList.add("hidden");
+      $("#registerError").classList.add("hidden");
+      (registering ? $("#registerForm") : $("#loginForm")).querySelector("input").focus();
+    });
+    $("#registerForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submit = form.querySelector('[type="submit"]');
+      submit.disabled = true;
+      $("#registerError").classList.add("hidden");
+      try {
+        const values = new FormData(form);
+        const result = await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({
+            name: values.get("name"),
+            email: values.get("email"),
+            password: values.get("password"),
+          }),
+        });
+        state.account = result.account;
+        state.csrfToken = result.csrfToken;
+        await loadPortalData();
+        $("#loginScreen").classList.add("hidden");
+        $("#appShell").classList.remove("hidden");
+        setPage("subbots");
+        showToast("Akun berhasil dibuat. Anda dapat mulai pairing sub-bot.");
+      } catch (error) {
+        $("#registerError").textContent = error.message;
+        $("#registerError").classList.remove("hidden");
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    $("#subbotMethod").addEventListener("change", () => {
+      const needsPhone = $("#subbotMethod").value === "pairing-code";
+      $("#subbotPhoneField").classList.toggle("hidden", !needsPhone);
+      $("#subbotPhone").required = needsPhone;
+    });
+    $("#subbotSettingsForm").addEventListener("input", () => {
+      subbotSettingsDirty = true;
+      $("#subbotSettingsError").classList.add("hidden");
+    });
+    $("#subbotSettingsForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const config = { image: {} };
+      for (const [name, value] of new FormData(form)) {
+        const [section, key] = name.split(".");
+        if (section === "image") config.image[key] = value;
+        else config[section] = value;
+      }
+      const button = $("#saveSubbotSettingsButton");
+      const errorBox = $("#subbotSettingsError");
+      button.disabled = true;
+      errorBox.classList.add("hidden");
+      try {
+        const result = await api("/api/subbots/me/settings", {
+          method: "POST",
+          body: JSON.stringify({ config }),
+        });
+        state.subbot = { ...(state.subbot || {}), config: result.config };
+        subbotSettingsDirty = false;
+        renderSubbot();
+        showToast("Pengaturan sub-bot berhasil disimpan.");
+      } catch (error) {
+        errorBox.textContent = error.message;
+        errorBox.classList.remove("hidden");
+      } finally {
+        button.disabled = false;
+        renderSubbot();
+      }
+    });
+    $("#startSubbotButton").addEventListener("click", async () => {
+      if (subbotSettingsDirty) {
+        $("#subbotSettingsError").textContent = "Simpan pengaturan sub-bot sebelum memulai pairing.";
+        $("#subbotSettingsError").classList.remove("hidden");
+        return;
+      }
+      const method = $("#subbotMethod").value;
+      const phone = $("#subbotPhone").value.trim();
+      if (method === "pairing-code" && !/^[1-9]\d{7,14}$/.test(phone)) {
+        $("#subbotError").textContent = "Masukkan nomor internasional 8–15 digit tanpa tanda +.";
+        $("#subbotError").classList.remove("hidden");
+        return;
+      }
+      const button = $("#startSubbotButton");
+      button.disabled = true;
+      try {
+        const result = await api("/api/subbots/me", {
+          method: "POST",
+          body: JSON.stringify({ method, phone: method === "pairing-code" ? phone : null }),
+        });
+        state.subbot = result.subbot;
+        renderSubbot();
+      } catch (error) {
+        $("#subbotError").textContent = error.message;
+        $("#subbotError").classList.remove("hidden");
+      } finally {
+        button.disabled = false;
+      }
+    });
+    $("#stopSubbotButton").addEventListener("click", async () => {
+      const button = $("#stopSubbotButton");
+      button.disabled = true;
+      try {
+        await api("/api/subbots/me", { method: "DELETE" });
+        await pollSubbotStatus();
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        button.disabled = false;
       }
     });
     $("#logoutButton").addEventListener("click", logout);

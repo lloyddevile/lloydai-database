@@ -4,7 +4,7 @@ function canCreateRole(actor, role) {
 }
 
 function canManageAccount(actor, account) {
-  if (actor.role === "owner") return account.role === "partner" || account.role === "reseller";
+  if (actor.role === "owner") return account.role === "partner" || account.role === "reseller" || account.role === "user";
   return actor.role === "partner" && account.role === "reseller" && account.parentId === actor.id;
 }
 

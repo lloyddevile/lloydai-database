@@ -576,6 +576,18 @@ html[data-theme="dark"] .modal-backdrop { background: rgba(4, 7, 5, .78); }
   margin-top: 2px;
 }
 
+.login-switch {
+  display: block;
+  margin: 18px auto 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #426d46;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
 .login-error {
   margin: -6px 0 0;
   color: #a53d2f;
@@ -590,6 +602,127 @@ html[data-theme="dark"] .modal-backdrop { background: rgba(4, 7, 5, .78); }
   font-size: 0.62rem;
   letter-spacing: 0.08em;
   text-align: center;
+}
+
+.subbot-panel {
+  max-width: 780px;
+  padding: 24px;
+}
+
+.subbot-settings-panel { margin-top: 14px; }
+.subbot-settings-form { display: grid; gap: 14px; }
+.subbot-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.subbot-settings-form .field-label { display: grid; gap: 7px; }
+.subbot-settings-form input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 10px;
+}
+.subbot-settings-form input:disabled { opacity: .62; }
+
+.subbot-description {
+  max-width: 620px;
+  margin: 10px 0 22px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.subbot-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 560px;
+}
+
+.subbot-controls .field-label {
+  display: grid;
+  gap: 8px;
+  color: #454941;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.subbot-controls input,
+.subbot-controls select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.subbot-controls small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.subbot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.subbot-error {
+  margin: 16px 0 0;
+  color: #a53d2f;
+  line-height: 1.5;
+}
+
+.subbot-pairing {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
+.subbot-pairing p {
+  margin: 0 0 16px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.subbot-qr {
+  display: block;
+  width: min(100%, 280px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.subbot-code {
+  display: inline-block;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 1.4rem var(--mono);
+  letter-spacing: 0.16em;
+}
+
+html[data-theme="dark"] .subbot-controls .field-label { color: var(--ink); }
+html[data-theme="dark"] .subbot-controls input,
+html[data-theme="dark"] .subbot-controls select,
+html[data-theme="dark"] .subbot-settings-form input {
+  border-color: #4a554d;
+  background: #151a17;
+  color: var(--ink);
+}
+html[data-theme="dark"] .subbot-code { background: #252d28; }
+
+@media (max-width: 700px) {
+  .subbot-controls { grid-template-columns: 1fr; }
+  .subbot-settings-grid { grid-template-columns: 1fr; }
+  .subbot-panel { padding: 18px; }
 }
 
 @media (max-width: 520px) {
