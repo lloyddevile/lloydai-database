@@ -24,6 +24,7 @@ async function serveAsset(request, assets) {
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "no-referrer");
   headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  headers.set("Cache-Control", "no-store, max-age=0");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -249,6 +250,7 @@ app.use("*", async (c, next) => {
   c.header("X-Frame-Options", "DENY");
   c.header("Referrer-Policy", "no-referrer");
   c.header("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  c.header("Cache-Control", "no-store, max-age=0");
   await next();
 });
 
@@ -749,15 +751,27 @@ api.post("/subbots/me", requireCsrf, requireAuth, async (c) => {
 
 api.delete("/subbots/me", requireCsrf, requireAuth, async (c) => {
   const result = await c.get("db").query(
-    `UPDATE portal_subbots
-     SET status = 'stop_requested', command = 'stop', pairing_code = NULL,
-         qr_image = NULL, error_message = NULL, updated_at = now()
-     WHERE account_id = $1 AND status IN ('queued', 'starting', 'pairing', 'connected')
-     RETURNING id`,
+    `WITH stopped AS (
+       UPDATE portal_subbots
+       SET status = 'stop_requested', command = 'stop', pairing_code = NULL,
+           qr_image = NULL, error_message = NULL, updated_at = now()
+       WHERE account_id = $1 AND status IN ('queued', 'starting', 'pairing', 'connected')
+       RETURNING status, true AS stopping
+     )
+     SELECT status, stopping FROM stopped
+     UNION ALL
+     SELECT status, status = 'stop_requested' AS stopping
+     FROM portal_subbots
+     WHERE account_id = $1 AND NOT EXISTS (SELECT 1 FROM stopped)
+     LIMIT 1`,
     [c.get("account").id],
   );
-  if (!result.rowCount) return apiError(c, 404, "Tidak ada sub-bot aktif untuk dihentikan.");
-  return c.json({ stopping: true }, 202);
+  const subbot = result.rows[0];
+  if (!subbot) return apiError(c, 404, "Sesi sub-bot tidak ditemukan.");
+  return c.json({
+    stopping: subbot.stopping,
+    status: subbot.status,
+  }, subbot.stopping ? 202 : 200);
 });
 
 api.post("/bot/subbots/claim", requireSubbotWorker, async (c) => {
@@ -812,6 +826,14 @@ api.post("/bot/subbots/sync", requireSubbotWorker, async (c) => {
      WHERE (account.id IS NULL OR account.status <> 'active')
        AND subbot.status IN ('queued', 'starting', 'pairing', 'connected', 'stop_requested')`,
   );
+  const inactive = await c.get("db").query(
+    `SELECT subbot.id, subbot.status, subbot.command, subbot.updated_at
+     FROM portal_subbots subbot
+     JOIN portal_accounts account ON account.id = subbot.account_id
+     WHERE account.status = 'active'
+       AND subbot.status IN ('queued', 'stop_requested', 'stopped', 'failed')
+     ORDER BY subbot.updated_at DESC`,
+  );
   return c.json({
     subbots: result.rows.map((row) => ({
       id: row.id,
@@ -821,6 +843,12 @@ api.post("/bot/subbots/sync", requireSubbotWorker, async (c) => {
       config: row.config || {},
     })),
     revoked: revoked.rows.map((row) => ({ id: row.id, purgeSession: row.purge_session })),
+    inactive: inactive.rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      command: row.command,
+      updatedAt: row.updated_at,
+    })),
   });
 });
 
@@ -847,10 +875,18 @@ api.post("/bot/subbots/:id/status", requireSubbotWorker, async (c) => {
        error_message = CASE WHEN $1::varchar = 'failed' THEN $5::varchar ELSE NULL END,
        updated_at = now(), worker_seen_at = now()
      WHERE id = $6::uuid
+       AND (
+         ($1::varchar IN ('starting', 'pairing', 'connected')
+           AND status IN ('starting', 'pairing', 'connected'))
+         OR ($1::varchar = 'stopped'
+           AND status IN ('queued', 'starting', 'pairing', 'connected', 'stop_requested'))
+         OR ($1::varchar = 'failed'
+           AND status IN ('queued', 'starting', 'pairing', 'connected'))
+       )
      RETURNING id`,
     [status, pairingCode, qrImage, connectedPhone, errorMessage, c.req.param("id")],
   );
-  if (!result.rowCount) return apiError(c, 404, "Sub-bot tidak ditemukan.");
+  if (!result.rowCount) return c.json({ updated: false, ignored: true });
   return c.json({ updated: true });
 });
 

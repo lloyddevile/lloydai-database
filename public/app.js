@@ -28,6 +28,7 @@
   let lastFocusedElement = null;
   let subbotPollTimer = null;
   let subbotPollInFlight = false;
+  let subbotPollQueued = false;
   let lastSubbotPollErrorAt = 0;
   let subbotSettingsDirty = false;
   const themeStorageKey = "lloyd-license-theme";
@@ -96,33 +97,48 @@
   }
 
   async function api(path, options = {}) {
+    const { timeoutMs = 15_000, ...requestOptions } = options;
     const headers = new Headers(options.headers || {});
     if (options.body !== undefined) headers.set("Content-Type", "application/json");
     if (options.method && options.method !== "GET" && state.csrfToken) {
       headers.set("X-CSRF-Token", state.csrfToken);
     }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
-      response = await fetch(path, {
-        ...options,
-        headers,
-        credentials: "same-origin",
-      });
-    } catch {
-      throw new Error("Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.");
+      try {
+        response = await fetch(path, {
+          ...requestOptions,
+          headers,
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (error.name === "AbortError") {
+          throw new Error("Server terlalu lama merespons. Data akan dicoba dimuat kembali.");
+        }
+        throw new Error("Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.");
+      }
+      if (response.status === 401 && !path.endsWith("/auth/login")) {
+        showLogin("Sesi berakhir. Silakan masuk kembali.", true);
+      }
+      if (response.status === 204) return null;
+      let data;
+      try {
+        data = await response.json();
+      } catch (error) {
+        if (error.name === "AbortError" || controller.signal.aborted) {
+          throw new Error("Server terlalu lama merespons. Data akan dicoba dimuat kembali.");
+        }
+        throw new Error("Server mengirim respons yang tidak dapat dibaca.");
+      }
+      if (!response.ok) throw new Error(data.error || `Permintaan gagal (${response.status}).`);
+      return data;
+    } finally {
+      clearTimeout(timeout);
     }
-    if (response.status === 401 && !path.endsWith("/auth/login")) {
-      showLogin("Sesi berakhir. Silakan masuk kembali.", true);
-    }
-    if (response.status === 204) return null;
-    let data;
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error("Server mengirim respons yang tidak dapat dibaca.");
-    }
-    if (!response.ok) throw new Error(data.error || `Permintaan gagal (${response.status}).`);
-    return data;
   }
 
   async function getCsrfToken() {
@@ -143,19 +159,28 @@
       return;
     }
     const requests = [
-      api("/api/accounts"),
-      api("/api/licenses"),
-      api("/api/announcement"),
-      api("/api/subbots/me"),
+      api("/api/accounts").then((result) => { state.accounts = result.accounts; }),
+      api("/api/licenses").then((result) => { state.licenses = result.licenses; }),
+      api("/api/announcement").then((result) => { state.announcement = result.announcement; }),
+      api("/api/subbots/me").then((result) => { state.subbot = result.subbot; }),
     ];
-    if (isOwner()) requests.push(api("/api/bot/password"));
-    const [accountsResult, licensesResult, announcementResult, subbotResult, botPasswordResult] = await Promise.all(requests);
-    state.accounts = accountsResult.accounts;
-    state.licenses = licensesResult.licenses;
-    state.announcement = announcementResult.announcement;
-    state.subbot = subbotResult.subbot;
-    state.botPasswordConfigured = Boolean(botPasswordResult?.configured);
-    render();
+    if (isOwner()) {
+      requests.push(api("/api/bot/password").then((result) => {
+        state.botPasswordConfigured = Boolean(result.configured);
+      }));
+    }
+    let hasRendered = false;
+    const results = await Promise.allSettled(requests.map(async (request) => {
+      await request;
+      render();
+      hasRendered = true;
+    }));
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) {
+      if (!hasRendered) throw failure.reason;
+      console.error("[PORTAL] Sebagian data gagal dimuat:", failure.reason);
+      throw new Error("Sebagian data gagal dimuat. Periksa koneksi lalu coba muat ulang.");
+    }
   }
 
   function showAnnouncement() {
@@ -173,16 +198,23 @@
       await getCsrfToken();
       const result = await api("/api/auth/me");
       state.account = result.account;
-      await loadPortalData();
       $("#loginScreen").classList.add("hidden");
       $("#appShell").classList.remove("hidden");
-      showAnnouncement();
+      render();
     } catch (error) {
       if (!state.account) showLogin(error.message.includes("Sesi") ? error.message : "");
       if (!error.message.includes("Silakan masuk")) {
         $("#loginError").textContent = error.message;
         $("#loginError").classList.toggle("hidden", !error.message);
       }
+      return;
+    }
+
+    try {
+      await loadPortalData();
+      showAnnouncement();
+    } catch (error) {
+      showToast(error.message);
     }
   }
 
@@ -406,8 +438,11 @@
     badge.innerHTML = `<i></i>${escapeHtml(statusCopy[status] || "Belum dipasangkan")}`;
 
     const active = ["queued", "starting", "pairing", "connected", "stop_requested"].includes(status);
-    $("#startSubbotButton").classList.toggle("hidden", active);
-    $("#startSubbotButton").textContent = ["failed", "stopped"].includes(status) ? "Pairing ulang" : "Mulai pairing";
+    $("#startSubbotButton").classList.toggle("hidden", active && status !== "stop_requested");
+    $("#startSubbotButton").textContent = ["failed", "stopped", "stop_requested"].includes(status)
+      ? "Pairing ulang"
+      : "Mulai pairing";
+    $("#startSubbotButton").disabled = status === "stop_requested";
     $("#stopSubbotButton").classList.toggle("hidden", !active);
     $("#subbotMethod").disabled = active;
     $("#subbotPhone").disabled = active;
@@ -457,11 +492,14 @@
     }
   }
 
-  async function pollSubbotStatus() {
-    if (subbotPollInFlight) return;
+  async function pollSubbotStatus(queueIfInFlight = false) {
+    if (subbotPollInFlight) {
+      if (queueIfInFlight) subbotPollQueued = true;
+      return;
+    }
     subbotPollInFlight = true;
     try {
-      const result = await api("/api/subbots/me");
+      const result = await api("/api/subbots/me", { timeoutMs: 5_000 });
       state.subbot = result.subbot;
       lastSubbotPollErrorAt = 0;
       renderSubbot();
@@ -472,6 +510,10 @@
       }
     } finally {
       subbotPollInFlight = false;
+      if (subbotPollQueued) {
+        subbotPollQueued = false;
+        void pollSubbotStatus();
+      }
     }
   }
 
@@ -933,11 +975,28 @@
     $("#stopSubbotButton").addEventListener("click", async () => {
       const button = $("#stopSubbotButton");
       button.disabled = true;
+      state.subbot = {
+        ...(state.subbot || {}),
+        status: "stop_requested",
+        qrImage: null,
+        pairingCode: null,
+      };
+      renderSubbot();
       try {
-        await api("/api/subbots/me", { method: "DELETE" });
-        await pollSubbotStatus();
+        const result = await api("/api/subbots/me", { method: "DELETE" });
+        if (!result.stopping && ["stopped", "failed"].includes(result.status)) {
+          state.subbot = {
+            ...(state.subbot || {}),
+            status: result.status,
+            qrImage: null,
+            pairingCode: null,
+          };
+          renderSubbot();
+        }
+        await pollSubbotStatus(true);
       } catch (error) {
         showToast(error.message);
+        await pollSubbotStatus(true);
       } finally {
         button.disabled = false;
       }

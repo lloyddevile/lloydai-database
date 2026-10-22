@@ -31,6 +31,7 @@ test("Worker issues a signed CSRF session without requiring a database connectio
     { SESSION_SECRET: "test-secret-with-at-least-32-characters" },
   );
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
   const body = await response.json();
   assert.match(body.csrfToken, /^[a-f0-9]{64}$/);
   assert.match(response.headers.get("set-cookie"), /HttpOnly/);
@@ -53,6 +54,7 @@ test("Worker forwards non-API requests to the configured assets binding", async 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "portal assets");
   assert.match(response.headers.get("content-security-policy"), /script-src 'self'/);
+  assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
 });
 
 test("login accepts a case-insensitive account name as username", async () => {
@@ -757,6 +759,107 @@ test("sub-bot worker endpoints reject requests without the configured bearer tok
       },
     );
     assert.equal(response.status, 401);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});
+
+test("stale sub-bot status updates cannot restart a stopped session", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  let updateQuery = "";
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async function (sql) {
+    if (sql.includes("UPDATE portal_subbots SET")) {
+      updateQuery = sql;
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected database query: ${sql}`);
+  };
+
+  try {
+    const response = await app.request(
+      "https://portal.example/api/bot/subbots/9752f52b-7f8f-445b-83d2-7542b37d9186/status",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer configured-worker-secret-with-32-characters",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "pairing", qrImage: "data:image/png;base64,cXJkYXRh" }),
+      },
+      {
+        SESSION_SECRET: TEST_SECRET,
+        SUBBOT_WORKER_TOKEN: "configured-worker-secret-with-32-characters",
+        HYPERDRIVE: { connectionString: "postgres://portal.example/db" },
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { updated: false, ignored: true });
+    assert.match(updateQuery, /status IN \('starting', 'pairing', 'connected'\)/);
+  } finally {
+    Client.prototype.connect = originalConnect;
+    Client.prototype.query = originalQuery;
+    Client.prototype.end = originalEnd;
+  }
+});
+
+test("stopping a sub-bot is idempotent while it is stopping or already stopped", async () => {
+  const originalConnect = Client.prototype.connect;
+  const originalQuery = Client.prototype.query;
+  const originalEnd = Client.prototype.end;
+  let currentStatus = "starting";
+  Client.prototype.connect = async () => {};
+  Client.prototype.end = async () => {};
+  Client.prototype.query = async function (sql) {
+    if (sql.includes("WITH RECURSIVE account_chain AS")) {
+      return {
+        rows: [{
+          id: "user-id",
+          name: "Pairing User",
+          email: "user@example.test",
+          role: "user",
+          parent_id: null,
+          status: "active",
+        }],
+      };
+    }
+    if (sql.includes("WITH stopped AS")) {
+      const stopping = currentStatus === "starting" || currentStatus === "stop_requested";
+      return {
+        rows: [{
+          status: stopping ? "stop_requested" : currentStatus,
+          stopping,
+        }],
+        rowCount: 1,
+      };
+    }
+    throw new Error(`Unexpected database query: ${sql}`);
+  };
+
+  try {
+    const session = await createSession("user-id");
+    const options = { SESSION_SECRET: TEST_SECRET, HYPERDRIVE: { connectionString: "postgres://portal.example/db" } };
+    for (const state of [
+      { initial: "starting", httpStatus: 202, expected: { stopping: true, status: "stop_requested" } },
+      { initial: "stop_requested", httpStatus: 202, expected: { stopping: true, status: "stop_requested" } },
+      { initial: "stopped", httpStatus: 200, expected: { stopping: false, status: "stopped" } },
+      { initial: "failed", httpStatus: 200, expected: { stopping: false, status: "failed" } },
+    ]) {
+      currentStatus = state.initial;
+      const response = await app.request(
+        "https://portal.example/api/subbots/me",
+        { method: "DELETE", headers: sessionHeaders(session) },
+        options,
+      );
+      assert.equal(response.status, state.httpStatus, state.initial);
+      assert.deepEqual(await response.json(), state.expected, state.initial);
+    }
   } finally {
     Client.prototype.connect = originalConnect;
     Client.prototype.query = originalQuery;
